@@ -51,6 +51,8 @@ export function setup(ctx) {
     simple: { own: '', length: '', style: '', speak_for: '', intimacy: '', pacing: '', narration: '' },
     templates: { ...DEFAULT_TEMPLATES },
     wfm_include_preset: false,
+    wfm_preset_id: null,
+    preset_list: [],
   };
   let panelOpen = false, activeTab = 'ri';
   let drafts = [], draftIdx = 0, generating = false;
@@ -267,6 +269,16 @@ export function setup(ctx) {
     .ri-wfm-option-label {
       font-size: 11.5px; color: var(--lumiverse-text-muted);
     }
+    #ri-preset-select {
+      width: 100%; box-sizing: border-box;
+      background: var(--lumiverse-fill-subtle); border: 1px solid var(--lumiverse-border);
+      border-radius: var(--lumiverse-radius); color: var(--lumiverse-text);
+      font-size: 12px; font-family: inherit; padding: 5px 8px; outline: none;
+      transition: border-color 0.14s; cursor: pointer;
+    }
+    #ri-preset-select:focus { border-color: var(--lumiverse-accent); }
+    #ri-preset-select:disabled { opacity: 0.4; cursor: default; }
+    #ri-preset-picker { display: none; }
   `);
 
   function getComposerInput() {
@@ -431,6 +443,11 @@ export function setup(ctx) {
             </label>
             <span class="ri-wfm-option-label">Include preset context</span>
           </div>
+          <div id="ri-preset-picker">
+            <select id="ri-preset-select">
+              <option value="">— select a preset —</option>
+            </select>
+          </div>
           <div class="ri-wfm-actions">
             <button class="ri-btn ri-btn-gen" id="ri-gen">${IC.gen} Generate</button>
             <button class="ri-btn ri-btn-use" id="ri-use" disabled>${IC.use} Use this</button>
@@ -518,7 +535,16 @@ export function setup(ctx) {
     el.querySelector('#ri-wfm-tab-gen').onclick   = () => setWfmView('generate');
     el.querySelector('#ri-wfm-tab-saved').onclick = () => setWfmView('saved');
     el.querySelector('#ri-dir-ta').oninput = (e) => { state.wfm_direction = e.target.value; };
-    el.querySelector('#ri-wfm-preset-chk').onchange = (e) => { state.wfm_include_preset = e.target.checked; push(); };
+    el.querySelector('#ri-wfm-preset-chk').onchange = (e) => {
+      state.wfm_include_preset = e.target.checked;
+      const picker = document.getElementById('ri-preset-picker');
+      if (picker) picker.style.display = e.target.checked ? 'block' : 'none';
+      push();
+    };
+    el.querySelector('#ri-preset-select').onchange = (e) => {
+      state.wfm_preset_id = e.target.value || null;
+      push();
+    };
     el.querySelector('#ri-gen').onclick     = generate;
     el.querySelector('#ri-use').onclick     = () => { if (drafts[draftIdx]) insertDraft(drafts[draftIdx]); };
     el.querySelector('#ri-prev').onclick    = () => { if (draftIdx > 0) { draftIdx--; renderDraftNav(); } };
@@ -716,12 +742,33 @@ export function setup(ctx) {
     const tplRew = document.getElementById('ri-tpl-rewrite');
     const tplScr = document.getElementById('ri-tpl-scratch');
 
-    const presetChk = document.getElementById('ri-wfm-preset-chk');
+    const presetChk    = document.getElementById('ri-wfm-preset-chk');
+    const presetSelect = document.getElementById('ri-preset-select');
+    const presetPicker = document.getElementById('ri-preset-picker');
 
-    if (ta)        ta.value        = state.instruction;
-    if (chk)       chk.checked     = state.enabled;
-    if (dir)       dir.value       = state.wfm_direction;
+    if (ta)        ta.value          = state.instruction;
+    if (chk)       chk.checked       = state.enabled;
+    if (dir)       dir.value         = state.wfm_direction;
     if (presetChk) presetChk.checked = state.wfm_include_preset ?? false;
+
+    if (presetPicker) presetPicker.style.display = (state.wfm_include_preset) ? 'block' : 'none';
+
+    if (presetSelect && state.preset_list?.length) {
+      const current = presetSelect.value;
+      presetSelect.innerHTML = '<option value="">— select a preset —</option>';
+      for (const p of state.preset_list) {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        presetSelect.appendChild(opt);
+      }
+      // restore saved selection, fallback to first preset if none saved
+      presetSelect.value = state.wfm_preset_id || current || '';
+      if (!presetSelect.value && state.preset_list.length) {
+        presetSelect.value = state.preset_list[0].id;
+        state.wfm_preset_id = state.preset_list[0].id;
+      }
+    }
 
     const t = state.templates ?? DEFAULT_TEMPLATES;
     if (tplSys) tplSys.value = t.system_prompt ?? DEFAULT_TEMPLATES.system_prompt;
@@ -819,7 +866,7 @@ export function setup(ctx) {
 
   const unsubMsg = ctx.onBackendMessage((payload) => {
     if (payload.type === 'ri:state') {
-      state = { saved_drafts: [], templates: { ...DEFAULT_TEMPLATES }, wfm_include_preset: false, ...state, ...payload.state };
+      state = { saved_drafts: [], templates: { ...DEFAULT_TEMPLATES }, wfm_include_preset: false, wfm_preset_id: null, preset_list: [], ...state, ...payload.state };
       applyStateToUI();
       ctx.sendToBackend({ type: 'ri:update', ...state });
     }

@@ -9,6 +9,7 @@ let savedRiMode = 'simple';
 let savedSimple = {};
 let savedTemplates = {};
 let wfmIncludePreset = false;
+let wfmPresetId = null;
 
 const DEFAULT_TEMPLATES = {
   system_prompt: `You are a creative fiction ghostwriter in an ongoing novel-style roleplay between {{user}} and {{char}}.
@@ -52,6 +53,7 @@ async function loadState(userId) {
     savedSimple        = parsed.simple        ?? {};
     savedTemplates     = parsed.templates       ?? { ...DEFAULT_TEMPLATES };
     wfmIncludePreset   = parsed.wfm_include_preset ?? false;
+    wfmPresetId        = parsed.wfm_preset_id      ?? null;
   } catch (_) {
     savedTemplates = { ...DEFAULT_TEMPLATES };
   }
@@ -69,6 +71,7 @@ async function persistState(userId) {
       simple:             savedSimple,
       templates:          savedTemplates,
       wfm_include_preset: wfmIncludePreset,
+      wfm_preset_id:      wfmPresetId,
     }));
   } catch (_) {}
 }
@@ -88,6 +91,11 @@ spindle.onFrontendMessage(async (payload, userId) => {
 
   if (payload.type === 'ri:load') {
     await loadState(userId);
+    let presetList = [];
+    try {
+      const { data } = await spindle.presets.list({ limit: 50 });
+      presetList = (data ?? []).map(p => ({ id: p.id, name: p.name }));
+    } catch (_) {}
     spindle.sendToFrontend({
       type: 'ri:state',
       state: {
@@ -100,6 +108,8 @@ spindle.onFrontendMessage(async (payload, userId) => {
         simple:             savedSimple,
         templates:          savedTemplates,
         wfm_include_preset: wfmIncludePreset,
+        wfm_preset_id:      wfmPresetId,
+        preset_list:        presetList,
       },
     }, userId);
   }
@@ -114,6 +124,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
     savedSimple        = payload.simple        ?? savedSimple;
     savedTemplates     = payload.templates          ?? savedTemplates;
     wfmIncludePreset   = payload.wfm_include_preset ?? wfmIncludePreset;
+    wfmPresetId        = payload.wfm_preset_id      ?? wfmPresetId;
     await persistState(userId);
   }
 
@@ -140,9 +151,9 @@ spindle.onFrontendMessage(async (payload, userId) => {
 
       // ─── Fetch preset blocks if enabled ──────────────────────────────────
       const presetMessages = [];
-      if (wfmIncludePreset && conn.preset_id) {
+      if (wfmIncludePreset && wfmPresetId) {
         try {
-          const preset = await spindle.presets.get(conn.preset_id);
+          const preset = await spindle.presets.get(wfmPresetId);
           if (preset?.prompt_order?.length) {
             for (const block of preset.prompt_order) {
               if (!block.enabled || !block.content?.trim() || block.marker) continue;

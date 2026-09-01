@@ -1,11 +1,17 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Saucepan Seasoning",
   "identifier": "response_instructions",
   "author": "bumyann",
   "github": "https://github.com/bumyann/lumiverse-response-instructions",
   "homepage": "https://github.com/bumyann/lumiverse-response-instructions",
-  "permissions": ["interceptor", "generation"],
+  "permissions": [
+    "interceptor",
+    "generation",
+    "chats",
+    "characters",
+    "world_books"
+  ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",
   "interceptorTimeoutMs": 5000

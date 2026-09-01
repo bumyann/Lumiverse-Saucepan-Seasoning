@@ -268,7 +268,7 @@ export function setup(ctx) {
     .ri-lib-view {
       display: none; flex-direction: column; gap: 0;
     }
-    .ri-lib-view.ri-visible { display: flex; }
+    .ri-lib-view.ri-visible { display: flex; min-height: 200px; }
     .ri-lib-header {
       display: flex; align-items: center; gap: 5px;
       padding: 5px 10px; border-bottom: 1px solid var(--lumiverse-border);
@@ -621,16 +621,26 @@ export function setup(ctx) {
 
     // RI Library wiring
     function showRiLib() {
-      el.querySelector('#ri-simple-body').style.display = 'none';
-      el.querySelector('#ri-custom-body').style.display = 'none';
-      el.querySelector('#ri-mode-tabs').style.display = 'none';
-      el.querySelector('#ri-lib-view').classList.add('ri-visible');
+      const simpleBody = el.querySelector('#ri-simple-body');
+      const customBody = el.querySelector('#ri-custom-body');
+      const modeTabs   = el.querySelector('#ri-mode-tabs');
+      const libView    = el.querySelector('#ri-lib-view');
+      // show lib first, then hide bodies — prevents panel from collapsing mid-transition
+      if (libView)    libView.classList.add('ri-visible');
+      if (simpleBody) simpleBody.style.display = 'none';
+      if (customBody) customBody.style.display = 'none';
+      if (modeTabs)   modeTabs.style.display   = 'none';
       renderRiLib();
     }
     function hideRiLib() {
-      el.querySelector('#ri-lib-view').classList.remove('ri-visible');
-      el.querySelector('#ri-mode-tabs').style.display = '';
+      const libView = el.querySelector('#ri-lib-view');
+      if (libView) libView.classList.remove('ri-visible');
+      // restore mode tabs and correct body
+      const modeTabs = el.querySelector('#ri-mode-tabs');
+      if (modeTabs) modeTabs.style.display = '';
       setRiMode(state.ri_mode, true);
+      // make sure panel stays open
+      document.getElementById('ri-panel')?.classList.add('ri-open');
     }
     function renderRiLib() {
       const list = el.querySelector('#ri-lib-list');

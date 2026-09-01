@@ -10,7 +10,8 @@
     "generation",
     "chats",
     "characters",
-    "world_books"
+    "world_books",
+    "presets"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",

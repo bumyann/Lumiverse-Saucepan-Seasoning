@@ -53,6 +53,8 @@ export function setup(ctx) {
     wfm_include_preset: false,
     wfm_preset_id: null,
     preset_list: [],
+    ri_presets: [],
+    wfm_dir_presets: [],
   };
   let panelOpen = false, activeTab = 'ri';
   let drafts = [], draftIdx = 0, generating = false;
@@ -263,6 +265,61 @@ export function setup(ctx) {
 
     .ri-help-text { font-size: 10.5px; color: var(--lumiverse-text-dim); line-height: 1.4; }
 
+    .ri-lib-view {
+      display: none; flex-direction: column; gap: 0;
+    }
+    .ri-lib-view.ri-visible { display: flex; }
+    .ri-lib-header {
+      display: flex; align-items: center; gap: 5px;
+      padding: 5px 10px; border-bottom: 1px solid var(--lumiverse-border);
+      font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--lumiverse-text-muted);
+    }
+    .ri-lib-header-title { flex: 1; }
+    .ri-lib-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; max-height: 360px; overflow-y: auto; }
+    .ri-lib-save-row { display: flex; gap: 5px; align-items: center; }
+    .ri-lib-name-input {
+      flex: 1; background: var(--lumiverse-fill-subtle); border: 1px solid var(--lumiverse-border);
+      border-radius: var(--lumiverse-radius); color: var(--lumiverse-text);
+      font-size: 12px; font-family: inherit; padding: 4px 8px; outline: none;
+      transition: border-color 0.14s;
+    }
+    .ri-lib-name-input:focus { border-color: var(--lumiverse-accent); }
+    .ri-lib-save-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 10px; border-radius: var(--lumiverse-radius);
+      font-size: 12px; font-family: inherit; cursor: pointer;
+      border: 1px solid var(--lumiverse-accent);
+      background: color-mix(in srgb, var(--lumiverse-accent) 14%, transparent);
+      color: var(--lumiverse-accent); white-space: nowrap;
+      transition: background 0.13s;
+    }
+    .ri-lib-save-btn:hover { background: color-mix(in srgb, var(--lumiverse-accent) 26%, transparent); }
+    .ri-lib-list { display: flex; flex-direction: column; gap: 4px; }
+    .ri-lib-item {
+      background: var(--lumiverse-fill-subtle); border: 1px solid var(--lumiverse-border);
+      border-radius: var(--lumiverse-radius); padding: 6px 9px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .ri-lib-item-name {
+      font-size: 12px; font-weight: 600; color: var(--lumiverse-text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .ri-lib-item-preview {
+      font-size: 11px; color: var(--lumiverse-text-dim);
+      overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .ri-lib-item-actions { display: flex; gap: 4px; }
+    .ri-lib-act {
+      display: inline-flex; align-items: center; gap: 3px;
+      background: none; border: 1px solid var(--lumiverse-border); border-radius: 3px;
+      color: var(--lumiverse-text-muted); font-size: 11px; font-family: inherit;
+      cursor: pointer; padding: 1px 6px; transition: color 0.12s, border-color 0.12s;
+    }
+    .ri-lib-act:hover { color: var(--lumiverse-accent); border-color: var(--lumiverse-accent); }
+    .ri-lib-del:hover { color: #f87171; border-color: #f87171; }
+    .ri-lib-empty { font-size: 11.5px; color: var(--lumiverse-text-dim); padding: 8px 4px; text-align: center; }
+
     .ri-wfm-option {
       display: flex; align-items: center; gap: 7px;
     }
@@ -405,6 +462,21 @@ export function setup(ctx) {
         <div class="ri-body" id="ri-custom-body" style="display:none;">
           <textarea class="ri-ta" id="ri-instr-ta" placeholder="Write response instructions here… injected into the next prompt."></textarea>
         </div>
+
+        <!-- RI Preset Library (inline swap) -->
+        <div class="ri-lib-view" id="ri-lib-view">
+          <div class="ri-lib-header">
+            <span class="ri-lib-header-title">Instruction Presets</span>
+            <button class="ri-hbtn" id="ri-lib-back" title="Back">${IC.close}</button>
+          </div>
+          <div class="ri-lib-body">
+            <div class="ri-lib-save-row">
+              <input class="ri-lib-name-input" id="ri-lib-name" placeholder="Preset name…" />
+              <button class="ri-lib-save-btn" id="ri-lib-save">${IC.save} Save current</button>
+            </div>
+            <div class="ri-lib-list" id="ri-lib-list"></div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB 2: WFM -->
@@ -416,7 +488,23 @@ export function setup(ctx) {
             <button class="ri-wfm-tab ri-on" id="ri-wfm-tab-gen">${IC.wfm} Generate</button>
             <button class="ri-wfm-tab" id="ri-wfm-tab-saved">${IC.list} Saved</button>
           </div>
+          <button class="ri-hbtn" id="ri-wfm-lib-btn" title="Direction Presets">${IC.folder}</button>
           <button class="ri-hbtn" id="ri-close-wfm" title="Close">${IC.close}</button>
+        </div>
+
+        <!-- WFM Direction Library (inline swap) -->
+        <div class="ri-lib-view" id="ri-wfm-lib-view">
+          <div class="ri-lib-header">
+            <span class="ri-lib-header-title">Direction Presets</span>
+            <button class="ri-hbtn" id="ri-wfm-lib-back" title="Back">${IC.close}</button>
+          </div>
+          <div class="ri-lib-body">
+            <div class="ri-lib-save-row">
+              <input class="ri-lib-name-input" id="ri-wfm-lib-name" placeholder="Preset name…" />
+              <button class="ri-lib-save-btn" id="ri-wfm-lib-save">${IC.save} Save current</button>
+            </div>
+            <div class="ri-lib-list" id="ri-wfm-lib-list"></div>
+          </div>
         </div>
 
         <div class="ri-body" id="ri-wfm-gen">
@@ -530,6 +618,139 @@ export function setup(ctx) {
     el.querySelector('#ri-close-ri').onclick  = closePanel;
     el.querySelector('#ri-close-wfm').onclick = closePanel;
     el.querySelector('#ri-close-tpl').onclick = closePanel;
+
+    // RI Library wiring
+    function showRiLib() {
+      el.querySelector('#ri-simple-body').style.display = 'none';
+      el.querySelector('#ri-custom-body').style.display = 'none';
+      el.querySelector('#ri-mode-tabs').style.display = 'none';
+      el.querySelector('#ri-lib-view').classList.add('ri-visible');
+      renderRiLib();
+    }
+    function hideRiLib() {
+      el.querySelector('#ri-lib-view').classList.remove('ri-visible');
+      el.querySelector('#ri-mode-tabs').style.display = '';
+      setRiMode(state.ri_mode, true);
+    }
+    function renderRiLib() {
+      const list = el.querySelector('#ri-lib-list');
+      if (!list) return;
+      list.innerHTML = '';
+      const presets = state.ri_presets ?? [];
+      if (!presets.length) {
+        list.innerHTML = `<div class="ri-lib-empty">No saved presets yet.<br>Set up your instructions and hit Save.</div>`;
+        return;
+      }
+      presets.forEach((p, i) => {
+        const item = document.createElement('div');
+        item.className = 'ri-lib-item';
+        item.innerHTML = `
+          <div class="ri-lib-item-name">${esc(p.name)}</div>
+          <div class="ri-lib-item-preview">${esc(p.text)}</div>
+          <div class="ri-lib-item-actions">
+            <button class="ri-lib-act ri-lib-load">Load</button>
+            <button class="ri-lib-act ri-lib-rename">Rename</button>
+            <button class="ri-lib-act ri-lib-del">${IC.trash}</button>
+          </div>`;
+        item.querySelector('.ri-lib-load').onclick = () => {
+          state.instruction = p.text;
+          state.ri_mode = 'custom';
+          const ta = document.getElementById('ri-instr-ta');
+          if (ta) ta.value = p.text;
+          hideRiLib();
+          setRiMode('custom');
+          push();
+        };
+        item.querySelector('.ri-lib-rename').onclick = () => {
+          const newName = prompt('Rename preset:', p.name);
+          if (newName?.trim()) {
+            state.ri_presets[i].name = newName.trim();
+            push(); renderRiLib();
+          }
+        };
+        item.querySelector('.ri-lib-del').onclick = () => {
+          state.ri_presets.splice(i, 1);
+          push(); renderRiLib();
+        };
+        list.appendChild(item);
+      });
+    }
+    el.querySelector('#ri-preset-btn').onclick = showRiLib;
+    el.querySelector('#ri-lib-back').onclick = hideRiLib;
+    el.querySelector('#ri-lib-save').onclick = () => {
+      const text = getActiveInstruction();
+      if (!text.trim()) return;
+      const nameInput = el.querySelector('#ri-lib-name');
+      const name = nameInput?.value?.trim() || `Preset ${(state.ri_presets?.length ?? 0) + 1}`;
+      if (!state.ri_presets) state.ri_presets = [];
+      state.ri_presets.push({ name, text });
+      if (nameInput) nameInput.value = '';
+      push(); renderRiLib();
+    };
+
+    // WFM Direction Library wiring
+    function showWfmLib() {
+      el.querySelector('#ri-wfm-gen').style.display  = 'none';
+      el.querySelector('#ri-wfm-saved').style.display = 'none';
+      el.querySelector('#ri-wfm-lib-view').classList.add('ri-visible');
+      renderWfmLib();
+    }
+    function hideWfmLib() {
+      el.querySelector('#ri-wfm-lib-view').classList.remove('ri-visible');
+      setWfmView(wfmView);
+    }
+    function renderWfmLib() {
+      const list = el.querySelector('#ri-wfm-lib-list');
+      if (!list) return;
+      list.innerHTML = '';
+      const presets = state.wfm_dir_presets ?? [];
+      if (!presets.length) {
+        list.innerHTML = `<div class="ri-lib-empty">No saved presets yet.<br>Write a direction and hit Save.</div>`;
+        return;
+      }
+      presets.forEach((p, i) => {
+        const item = document.createElement('div');
+        item.className = 'ri-lib-item';
+        item.innerHTML = `
+          <div class="ri-lib-item-name">${esc(p.name)}</div>
+          <div class="ri-lib-item-preview">${esc(p.text)}</div>
+          <div class="ri-lib-item-actions">
+            <button class="ri-lib-act ri-lib-load">Load</button>
+            <button class="ri-lib-act ri-lib-rename">Rename</button>
+            <button class="ri-lib-act ri-lib-del">${IC.trash}</button>
+          </div>`;
+        item.querySelector('.ri-lib-load').onclick = () => {
+          state.wfm_direction = p.text;
+          const ta = document.getElementById('ri-dir-ta');
+          if (ta) ta.value = p.text;
+          hideWfmLib();
+        };
+        item.querySelector('.ri-lib-rename').onclick = () => {
+          const newName = prompt('Rename preset:', p.name);
+          if (newName?.trim()) {
+            state.wfm_dir_presets[i].name = newName.trim();
+            push(); renderWfmLib();
+          }
+        };
+        item.querySelector('.ri-lib-del').onclick = () => {
+          state.wfm_dir_presets.splice(i, 1);
+          push(); renderWfmLib();
+        };
+        list.appendChild(item);
+      });
+    }
+    el.querySelector('#ri-wfm-lib-btn').onclick = showWfmLib;
+    el.querySelector('#ri-wfm-lib-back').onclick = hideWfmLib;
+    el.querySelector('#ri-wfm-lib-save').onclick = () => {
+      const text = (document.getElementById('ri-dir-ta')?.value ?? '').trim();
+      if (!text) return;
+      const nameInput = el.querySelector('#ri-wfm-lib-name');
+      const name = nameInput?.value?.trim() || `Preset ${(state.wfm_dir_presets?.length ?? 0) + 1}`;
+      if (!state.wfm_dir_presets) state.wfm_dir_presets = [];
+      state.wfm_dir_presets.push({ name, text });
+      if (nameInput) nameInput.value = '';
+      push(); renderWfmLib();
+    };
 
     // WFM Wiring
     el.querySelector('#ri-wfm-tab-gen').onclick   = () => setWfmView('generate');
@@ -866,7 +1087,7 @@ export function setup(ctx) {
 
   const unsubMsg = ctx.onBackendMessage((payload) => {
     if (payload.type === 'ri:state') {
-      state = { saved_drafts: [], templates: { ...DEFAULT_TEMPLATES }, wfm_include_preset: false, wfm_preset_id: null, preset_list: [], ...state, ...payload.state };
+      state = { saved_drafts: [], templates: { ...DEFAULT_TEMPLATES }, wfm_include_preset: false, wfm_preset_id: null, preset_list: [], ri_presets: [], wfm_dir_presets: [], ...state, ...payload.state };
       applyStateToUI();
       ctx.sendToBackend({ type: 'ri:update', ...state });
     }

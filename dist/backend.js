@@ -10,6 +10,8 @@ let savedSimple = {};
 let savedTemplates = {};
 let wfmIncludePreset = false;
 let wfmPresetId = null;
+let savedRiPresets = [];
+let savedWfmDirPresets = [];
 
 const DEFAULT_TEMPLATES = {
   system_prompt: `You are a creative fiction ghostwriter in an ongoing novel-style roleplay between {{user}} and {{char}}.
@@ -54,6 +56,8 @@ async function loadState(userId) {
     savedTemplates     = parsed.templates       ?? { ...DEFAULT_TEMPLATES };
     wfmIncludePreset   = parsed.wfm_include_preset ?? false;
     wfmPresetId        = parsed.wfm_preset_id      ?? null;
+    savedRiPresets     = parsed.ri_presets         ?? [];
+    savedWfmDirPresets = parsed.wfm_dir_presets    ?? [];
   } catch (_) {
     savedTemplates = { ...DEFAULT_TEMPLATES };
   }
@@ -72,6 +76,8 @@ async function persistState(userId) {
       templates:          savedTemplates,
       wfm_include_preset: wfmIncludePreset,
       wfm_preset_id:      wfmPresetId,
+      ri_presets:         savedRiPresets,
+      wfm_dir_presets:    savedWfmDirPresets,
     }));
   } catch (_) {}
 }
@@ -110,6 +116,8 @@ spindle.onFrontendMessage(async (payload, userId) => {
         wfm_include_preset: wfmIncludePreset,
         wfm_preset_id:      wfmPresetId,
         preset_list:        presetList,
+        ri_presets:         savedRiPresets,
+        wfm_dir_presets:    savedWfmDirPresets,
       },
     }, userId);
   }
@@ -125,6 +133,8 @@ spindle.onFrontendMessage(async (payload, userId) => {
     savedTemplates     = payload.templates          ?? savedTemplates;
     wfmIncludePreset   = payload.wfm_include_preset ?? wfmIncludePreset;
     wfmPresetId        = payload.wfm_preset_id      ?? wfmPresetId;
+    savedRiPresets     = payload.ri_presets         ?? savedRiPresets;
+    savedWfmDirPresets = payload.wfm_dir_presets    ?? savedWfmDirPresets;
     await persistState(userId);
   }
 

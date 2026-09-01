@@ -93,7 +93,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
     await loadState(userId);
     let presetList = [];
     try {
-      const { data } = await spindle.presets.list({ limit: 50 });
+      const { data } = await spindle.presets.list({ limit: 50, userId });
       presetList = (data ?? []).map(p => ({ id: p.id, name: p.name }));
     } catch (_) {}
     spindle.sendToFrontend({
@@ -153,7 +153,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
       const presetMessages = [];
       if (wfmIncludePreset && wfmPresetId) {
         try {
-          const preset = await spindle.presets.get(wfmPresetId);
+          const preset = await spindle.presets.get(wfmPresetId, userId);
           if (preset?.prompt_order?.length) {
             for (const block of preset.prompt_order) {
               if (!block.enabled || !block.content?.trim() || block.marker) continue;

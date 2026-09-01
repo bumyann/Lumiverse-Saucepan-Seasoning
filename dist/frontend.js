@@ -49,7 +49,8 @@ export function setup(ctx) {
     instruction: '', enabled: false, presets: {}, wfm_direction: '', saved_drafts: [],
     ri_mode: 'simple',
     simple: { own: '', length: '', style: '', speak_for: '', intimacy: '', pacing: '', narration: '' },
-    templates: { ...DEFAULT_TEMPLATES }
+    templates: { ...DEFAULT_TEMPLATES },
+    wfm_include_preset: false,
   };
   let panelOpen = false, activeTab = 'ri';
   let drafts = [], draftIdx = 0, generating = false;
@@ -259,6 +260,13 @@ export function setup(ctx) {
     .ri-composed-preview { font-size: 11px; color: var(--lumiverse-text-dim); font-style: italic; padding: 4px 0 0; min-height: 14px; line-height: 1.4; }
 
     .ri-help-text { font-size: 10.5px; color: var(--lumiverse-text-dim); line-height: 1.4; }
+
+    .ri-wfm-option {
+      display: flex; align-items: center; gap: 7px;
+    }
+    .ri-wfm-option-label {
+      font-size: 11.5px; color: var(--lumiverse-text-muted);
+    }
   `);
 
   function getComposerInput() {
@@ -415,6 +423,14 @@ export function setup(ctx) {
             <div class="ri-label">Instruction</div>
             <textarea class="ri-ta" id="ri-dir-ta" placeholder="e.g. 'act shy', 'confess feelings', 'change the subject'…"></textarea>
           </div>
+          <div class="ri-wfm-option">
+            <label class="ri-toggle" title="Include active preset prompt blocks in generation context">
+              <input type="checkbox" id="ri-wfm-preset-chk">
+              <span class="ri-toggle-track"></span>
+              <span class="ri-toggle-thumb"></span>
+            </label>
+            <span class="ri-wfm-option-label">Include preset context</span>
+          </div>
           <div class="ri-wfm-actions">
             <button class="ri-btn ri-btn-gen" id="ri-gen">${IC.gen} Generate</button>
             <button class="ri-btn ri-btn-use" id="ri-use" disabled>${IC.use} Use this</button>
@@ -502,6 +518,7 @@ export function setup(ctx) {
     el.querySelector('#ri-wfm-tab-gen').onclick   = () => setWfmView('generate');
     el.querySelector('#ri-wfm-tab-saved').onclick = () => setWfmView('saved');
     el.querySelector('#ri-dir-ta').oninput = (e) => { state.wfm_direction = e.target.value; };
+    el.querySelector('#ri-wfm-preset-chk').onchange = (e) => { state.wfm_include_preset = e.target.checked; push(); };
     el.querySelector('#ri-gen').onclick     = generate;
     el.querySelector('#ri-use').onclick     = () => { if (drafts[draftIdx]) insertDraft(drafts[draftIdx]); };
     el.querySelector('#ri-prev').onclick    = () => { if (draftIdx > 0) { draftIdx--; renderDraftNav(); } };
@@ -699,9 +716,12 @@ export function setup(ctx) {
     const tplRew = document.getElementById('ri-tpl-rewrite');
     const tplScr = document.getElementById('ri-tpl-scratch');
 
-    if (ta)  ta.value    = state.instruction;
-    if (chk) chk.checked = state.enabled;
-    if (dir) dir.value   = state.wfm_direction;
+    const presetChk = document.getElementById('ri-wfm-preset-chk');
+
+    if (ta)        ta.value        = state.instruction;
+    if (chk)       chk.checked     = state.enabled;
+    if (dir)       dir.value       = state.wfm_direction;
+    if (presetChk) presetChk.checked = state.wfm_include_preset ?? false;
 
     const t = state.templates ?? DEFAULT_TEMPLATES;
     if (tplSys) tplSys.value = t.system_prompt ?? DEFAULT_TEMPLATES.system_prompt;
@@ -799,7 +819,7 @@ export function setup(ctx) {
 
   const unsubMsg = ctx.onBackendMessage((payload) => {
     if (payload.type === 'ri:state') {
-      state = { saved_drafts: [], templates: { ...DEFAULT_TEMPLATES }, ...state, ...payload.state };
+      state = { saved_drafts: [], templates: { ...DEFAULT_TEMPLATES }, wfm_include_preset: false, ...state, ...payload.state };
       applyStateToUI();
       ctx.sendToBackend({ type: 'ri:update', ...state });
     }

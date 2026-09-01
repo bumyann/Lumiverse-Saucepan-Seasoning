@@ -8,6 +8,7 @@ let savedDrafts = [];
 let savedRiMode = 'simple';
 let savedSimple = {};
 let savedTemplates = {};
+let wfmIncludePreset = false;
 
 const DEFAULT_TEMPLATES = {
   system_prompt: `You are a creative fiction ghostwriter in an ongoing novel-style roleplay between {{user}} and {{char}}.
@@ -49,7 +50,8 @@ async function loadState(userId) {
     savedDrafts        = parsed.saved_drafts  ?? [];
     savedRiMode        = parsed.ri_mode       ?? 'simple';
     savedSimple        = parsed.simple        ?? {};
-    savedTemplates     = parsed.templates     ?? { ...DEFAULT_TEMPLATES };
+    savedTemplates     = parsed.templates       ?? { ...DEFAULT_TEMPLATES };
+    wfmIncludePreset   = parsed.wfm_include_preset ?? false;
   } catch (_) {
     savedTemplates = { ...DEFAULT_TEMPLATES };
   }
@@ -63,9 +65,10 @@ async function persistState(userId) {
       presets:       savedPresets,
       wfm_direction: savedWfmDir,
       saved_drafts:  savedDrafts,
-      ri_mode:       savedRiMode,
-      simple:        savedSimple,
-      templates:     savedTemplates,
+      ri_mode:            savedRiMode,
+      simple:             savedSimple,
+      templates:          savedTemplates,
+      wfm_include_preset: wfmIncludePreset,
     }));
   } catch (_) {}
 }
@@ -88,14 +91,15 @@ spindle.onFrontendMessage(async (payload, userId) => {
     spindle.sendToFrontend({
       type: 'ri:state',
       state: {
-        instruction:   activeInstruction,
-        enabled:       instructionEnabled,
-        presets:       savedPresets,
-        wfm_direction: savedWfmDir,
-        saved_drafts:  savedDrafts,
-        ri_mode:       savedRiMode,
-        simple:        savedSimple,
-        templates:     savedTemplates,
+        instruction:        activeInstruction,
+        enabled:            instructionEnabled,
+        presets:            savedPresets,
+        wfm_direction:      savedWfmDir,
+        saved_drafts:       savedDrafts,
+        ri_mode:            savedRiMode,
+        simple:             savedSimple,
+        templates:          savedTemplates,
+        wfm_include_preset: wfmIncludePreset,
       },
     }, userId);
   }
@@ -108,7 +112,8 @@ spindle.onFrontendMessage(async (payload, userId) => {
     savedDrafts        = payload.saved_drafts  ?? savedDrafts;
     savedRiMode        = payload.ri_mode       ?? savedRiMode;
     savedSimple        = payload.simple        ?? savedSimple;
-    savedTemplates     = payload.templates     ?? savedTemplates;
+    savedTemplates     = payload.templates          ?? savedTemplates;
+    wfmIncludePreset   = payload.wfm_include_preset ?? wfmIncludePreset;
     await persistState(userId);
   }
 
@@ -133,17 +138,41 @@ spindle.onFrontendMessage(async (payload, userId) => {
         direction: direction || 'Continue the scene naturally.'
       };
 
+      // ─── Fetch preset blocks if enabled ──────────────────────────────────
+      const presetMessages = [];
+      if (wfmIncludePreset && conn.preset_id) {
+        try {
+          const preset = await spindle.presets.get(conn.preset_id);
+          if (preset?.prompt_order?.length) {
+            for (const block of preset.prompt_order) {
+              if (!block.enabled || !block.content?.trim() || block.marker) continue;
+              presetMessages.push({
+                role: block.role === 'assistant' ? 'assistant' : 'system',
+                content: block.content.trim(),
+              });
+            }
+          }
+        } catch (err) {
+          spindle.log.warn('Could not fetch preset blocks:', err?.message);
+        }
+      }
+
       const systemMessage = renderTemplate(tpls.system_prompt, vars);
       const userPromptTemplate = userInput ? tpls.rewrite_prompt : tpls.scratch_prompt;
       const userMessage = renderTemplate(userPromptTemplate, vars);
 
-      const fullPrompt = `${systemMessage}\n\n${userMessage}`;
+      // preset blocks → ghostwriter system prompt → user prompt
+      const messages = [
+        ...presetMessages,
+        { role: 'system', content: systemMessage },
+        { role: 'user',   content: userMessage },
+      ];
 
       const result = await spindle.generate.quiet({
         type: 'quiet',
         userId,
         connection_id: conn.id,
-        messages: [{ role: 'user', content: fullPrompt }],
+        messages,
         parameters: { max_tokens: 600, temperature: 0.8 },
         reasoning: { source: 'off' },
       });

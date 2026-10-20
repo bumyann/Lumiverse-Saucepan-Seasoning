@@ -1,6 +1,6 @@
 # Saucepan Seasoning — Lumiverse
 
-<img src="https://i.imgur.com/dKkOyfc.png" alt="SaucepanSeasoning">
+<img src="https://i.imgur.com/GT1KvQV.png" alt="SaucepanSeasoning">
 
 Port of SaucepanAI's response instructions and write-for-me UI for **Lumiverse**, built as a native Spindle extension. Made this because I kept wanting Saucepan's in-chat commands while using Lumiverse and figured porting them was less painful than context-switching forever.
 

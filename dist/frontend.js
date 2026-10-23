@@ -16,40 +16,23 @@ const IC = {
   use:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
 };
 
-const DEFAULT_TEMPLATES = {
-  system_prompt: `You are a creative fiction ghostwriter in an ongoing novel-style roleplay between {{user}} and {{char}}.
-Write the next in-character narrative response from the perspective of {{user}}.
-
-CRITICAL RULES:
-- Output ONLY the raw story prose. NEVER include thinking notes, explanations, conversational filler, or meta-commentary.
-- Match the established literary tone, narrative pacing, and scene setting exactly.
-- Preserve established character pronouns (e.g. if {{user}} or {{char}} is male, use he/him; never default to they/them if established).
-- Do NOT use script-asterisk actions (*sighs*). Write in novel prose.`,
-  rewrite_prompt: `### Recent Story Excerpt:
-{{context}}
-
-### User Draft:
-{{draft}}
-
-### Direction:
-{{direction}}
-
-[Output raw story reply now]:`,
-  scratch_prompt: `### Recent Story Excerpt:
-{{context}}
-
-### Direction:
-{{direction}}
-
-[Output raw story reply now]:`
-};
+// generationType values the backend interceptor sees — keep in sync with backend.js
+const SCOPES = [
+  { key: 'normal',      label: 'Send',        tip: 'Regular messages you send' },
+  { key: 'continue',    label: 'Continue',    tip: 'Continue generations' },
+  { key: 'regenerate',  label: 'Regenerate',  tip: 'Regenerating the last reply' },
+  { key: 'swipe',       label: 'Swipe',       tip: 'Swiping to a new reply' },
+  { key: 'impersonate', label: 'Impersonate', tip: 'Impersonate / write as you' },
+  { key: 'quiet',       label: 'Quiet',       tip: 'Background generations from the host' },
+];
+const defaultScope = () => Object.fromEntries(SCOPES.map(s => [s.key, true]));
 
 export function setup(ctx) {
   let state = {
-    instruction: '', enabled: false, presets: {}, wfm_direction: '', saved_drafts: [],
+    instruction: '', enabled: false, scope: defaultScope(), wfm_direction: '', saved_drafts: [],
     ri_mode: 'simple',
     simple: { own: '', length: '', style: '', speak_for: '', intimacy: '', pacing: '', narration: '' },
-    templates: { ...DEFAULT_TEMPLATES },
+    templates: {},
     wfm_include_preset: false,
     wfm_preset_id: null,
     preset_list: [],
@@ -59,6 +42,8 @@ export function setup(ctx) {
   let panelOpen = false, activeTab = 'ri';
   let drafts = [], draftIdx = 0, generating = false;
   let wfmView = 'generate';
+  let defaultTemplates = {};   // supplied by the backend in ri:state
+  let pushTimer = null, genTimer = null;
 
   // ─── Styles ──────────────────────────────────────────────────────────────────
   const removeStyle = ctx.dom.addStyle(`
@@ -79,13 +64,15 @@ export function setup(ctx) {
       border-color: var(--lumiverse-accent); color: var(--lumiverse-accent);
       background: color-mix(in srgb, var(--lumiverse-accent) 12%, transparent);
     }
-    .ri-dot {
-      position: absolute; top: 4px; right: 4px;
-      width: 5px; height: 5px; border-radius: 50%;
-      background: var(--lumiverse-accent); box-shadow: 0 0 4px var(--lumiverse-accent);
-      display: none;
+    .ri-icon-btn .ri-dot {
+      position: absolute; top: 3px; right: 3px; z-index: 1;
+      width: 7px; height: 7px; border-radius: 50%; pointer-events: none;
+      background: var(--lumiverse-accent, #a78bfa);
+      box-shadow: 0 0 0 1.5px var(--lumiverse-bg, #1a1a1a), 0 0 5px var(--lumiverse-accent, #a78bfa);
+      display: none !important;
     }
-    .ri-icon-btn.ri-enabled .ri-dot { display: block; }
+    .ri-icon-btn.ri-enabled { color: var(--lumiverse-accent, #a78bfa); }
+    .ri-icon-btn.ri-enabled .ri-dot { display: block !important; }
     #ri-divider { width: 1px; height: 16px; background: var(--lumiverse-border); margin: 0 2px; flex-shrink: 0; }
 
     #ri-panel {
@@ -112,22 +99,23 @@ export function setup(ctx) {
     .ri-hbtn:hover { color: var(--lumiverse-text); background: var(--lumiverse-fill-subtle); }
     .ri-hbtn.ri-on { color: var(--lumiverse-accent); }
 
-    .ri-toggle { position: relative; width: 28px; height: 15px; flex-shrink: 0; cursor: pointer; }
+    .ri-toggle { position: relative; display: inline-block; width: 28px; height: 16px; flex-shrink: 0; cursor: pointer; }
     .ri-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
     .ri-toggle-track {
-      position: absolute; inset: 0; border-radius: 8px;
+      position: absolute; inset: 0; border-radius: 8px; box-sizing: border-box;
       background: var(--lumiverse-fill-subtle); border: 1px solid var(--lumiverse-border);
       transition: background 0.18s, border-color 0.18s;
     }
+    /* solid accent track + white thumb so the knob stays visible whatever the theme's accent is */
     .ri-toggle input:checked ~ .ri-toggle-track {
-      background: color-mix(in srgb, var(--lumiverse-accent) 30%, transparent);
-      border-color: var(--lumiverse-accent);
+      background: var(--lumiverse-accent, #a78bfa); border-color: var(--lumiverse-accent, #a78bfa);
     }
     .ri-toggle-thumb {
-      position: absolute; top: 2px; left: 2px; width: 9px; height: 9px;
-      border-radius: 50%; background: var(--lumiverse-text-dim); transition: transform 0.18s, background 0.18s;
+      position: absolute; z-index: 1; top: 3px; left: 3px; width: 10px; height: 10px;
+      border-radius: 50%; background: var(--lumiverse-text-dim); pointer-events: none;
+      transition: transform 0.18s, background 0.18s;
     }
-    .ri-toggle input:checked ~ .ri-toggle-thumb { transform: translateX(13px); background: var(--lumiverse-accent); }
+    .ri-toggle input:checked ~ .ri-toggle-thumb { transform: translateX(12px); background: #fff; }
 
     .ri-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; max-height: 400px; overflow-y: auto; }
 
@@ -263,6 +251,10 @@ export function setup(ctx) {
     .ri-simple-ta:focus { border-color: var(--lumiverse-accent); }
     .ri-composed-preview { font-size: 11px; color: var(--lumiverse-text-dim); font-style: italic; padding: 4px 0 0; min-height: 14px; line-height: 1.4; }
 
+    .ri-scope { padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--lumiverse-border); }
+    .ri-scope-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .ri-scope-summary { font-size: 10.5px; color: var(--lumiverse-text-dim); line-height: 1.4; }
+
     .ri-help-text { font-size: 10.5px; color: var(--lumiverse-text-dim); line-height: 1.4; }
 
     .ri-lib-view {
@@ -390,7 +382,7 @@ export function setup(ctx) {
           <button class="ri-hbtn" id="ri-clear-btn" title="Clear">${IC.trash}</button>
           <button class="ri-hbtn" id="ri-close-ri"  title="Close">${IC.close}</button>
         </div>
-        <div class="ri-mode-tabs">
+        <div class="ri-mode-tabs" id="ri-mode-tabs">
           <button class="ri-mode-tab ri-on" id="ri-mode-simple">Simple</button>
           <button class="ri-mode-tab" id="ri-mode-custom">Custom</button>
         </div>
@@ -398,7 +390,7 @@ export function setup(ctx) {
         <div class="ri-simple-body" id="ri-simple-body">
           <div class="ri-field">
             <div class="ri-field-label">Your own instructions</div>
-            <textarea class="ri-simple-ta" id="ri-simple-own" placeholder="Anything else? e.g. {{companion}} loses his memories"></textarea>
+            <textarea class="ri-simple-ta" id="ri-simple-own" placeholder="Anything else? e.g. {{char}} loses their memories"></textarea>
           </div>
           <div class="ri-field">
             <div class="ri-field-label">Length</div>
@@ -461,6 +453,14 @@ export function setup(ctx) {
 
         <div class="ri-body" id="ri-custom-body" style="display:none;">
           <textarea class="ri-ta" id="ri-instr-ta" placeholder="Write response instructions here… injected into the next prompt."></textarea>
+        </div>
+
+        <div class="ri-scope" id="ri-scope">
+          <div class="ri-field-label">Applies to</div>
+          <div class="ri-scope-chips">
+            ${SCOPES.map(sc => `<button class="ri-chip ri-scope-chip ri-on" data-scope="${sc.key}" title="${sc.tip}">${sc.label}</button>`).join('')}
+          </div>
+          <div class="ri-scope-summary" id="ri-scope-summary"></div>
         </div>
 
         <!-- RI Preset Library (inline swap) -->
@@ -580,7 +580,7 @@ export function setup(ctx) {
     const ta  = el.querySelector('#ri-instr-ta');
     const chk = el.querySelector('#ri-chk');
     ta.oninput   = () => { state.instruction = ta.value; push(); };
-    chk.onchange = () => { state.enabled = chk.checked; refreshRiBtn(); push(); };
+    chk.onchange = () => { state.enabled = chk.checked; refreshRiBtn(); push(true); };
     el.querySelector('#ri-clear-btn').onclick = () => {
       if (state.ri_mode === 'custom') {
         state.instruction = '';
@@ -591,8 +591,18 @@ export function setup(ctx) {
       }
       state.enabled = false;
       if (chk) chk.checked = false;
-      refreshRiBtn(); push();
+      refreshRiBtn(); push(true);
     };
+
+    el.querySelectorAll('.ri-scope-chip').forEach(chip => {
+      chip.onclick = () => {
+        const key = chip.dataset.scope;
+        state.scope[key] = !state.scope[key];
+        applyScopeToUI();
+        refreshRiBtn();
+        push(true);
+      };
+    });
 
     el.querySelector('#ri-mode-simple').onclick = () => setRiMode('simple');
     el.querySelector('#ri-mode-custom').onclick  = () => setRiMode('custom');
@@ -604,7 +614,7 @@ export function setup(ctx) {
           chip.classList.add('ri-on');
           state.simple[group.dataset.field] = chip.dataset.val;
           updateComposedPreview();
-          push();
+          push(true);
         };
       });
     });
@@ -624,12 +634,14 @@ export function setup(ctx) {
       const simpleBody = el.querySelector('#ri-simple-body');
       const customBody = el.querySelector('#ri-custom-body');
       const modeTabs   = el.querySelector('#ri-mode-tabs');
+      const scopeRow   = el.querySelector('#ri-scope');
       const libView    = el.querySelector('#ri-lib-view');
       // show lib first, then hide bodies — prevents panel from collapsing mid-transition
       if (libView)    libView.classList.add('ri-visible');
       if (simpleBody) simpleBody.style.display = 'none';
       if (customBody) customBody.style.display = 'none';
       if (modeTabs)   modeTabs.style.display   = 'none';
+      if (scopeRow)   scopeRow.style.display   = 'none';
       renderRiLib();
     }
     function hideRiLib() {
@@ -638,6 +650,8 @@ export function setup(ctx) {
       // restore mode tabs and correct body
       const modeTabs = el.querySelector('#ri-mode-tabs');
       if (modeTabs) modeTabs.style.display = '';
+      const scopeRow = el.querySelector('#ri-scope');
+      if (scopeRow) scopeRow.style.display = '';
       setRiMode(state.ri_mode, true);
       // make sure panel stays open
       document.getElementById('ri-panel')?.classList.add('ri-open');
@@ -669,18 +683,17 @@ export function setup(ctx) {
           if (ta) ta.value = p.text;
           hideRiLib();
           setRiMode('custom');
-          push();
+          push(true);
         };
         item.querySelector('.ri-lib-rename').onclick = () => {
-          const newName = prompt('Rename preset:', p.name);
-          if (newName?.trim()) {
-            state.ri_presets[i].name = newName.trim();
-            push(); renderRiLib();
-          }
+          startRename(item.querySelector('.ri-lib-item-name'), p.name, (name) => {
+            if (name) { state.ri_presets[i].name = name; push(true); }
+            renderRiLib();
+          });
         };
         item.querySelector('.ri-lib-del').onclick = () => {
           state.ri_presets.splice(i, 1);
-          push(); renderRiLib();
+          push(true); renderRiLib();
         };
         list.appendChild(item);
       });
@@ -695,7 +708,7 @@ export function setup(ctx) {
       if (!state.ri_presets) state.ri_presets = [];
       state.ri_presets.push({ name, text });
       if (nameInput) nameInput.value = '';
-      push(); renderRiLib();
+      push(true); renderRiLib();
     };
 
     // WFM Direction Library wiring
@@ -736,15 +749,14 @@ export function setup(ctx) {
           hideWfmLib();
         };
         item.querySelector('.ri-lib-rename').onclick = () => {
-          const newName = prompt('Rename preset:', p.name);
-          if (newName?.trim()) {
-            state.wfm_dir_presets[i].name = newName.trim();
-            push(); renderWfmLib();
-          }
+          startRename(item.querySelector('.ri-lib-item-name'), p.name, (name) => {
+            if (name) { state.wfm_dir_presets[i].name = name; push(true); }
+            renderWfmLib();
+          });
         };
         item.querySelector('.ri-lib-del').onclick = () => {
           state.wfm_dir_presets.splice(i, 1);
-          push(); renderWfmLib();
+          push(true); renderWfmLib();
         };
         list.appendChild(item);
       });
@@ -759,22 +771,22 @@ export function setup(ctx) {
       if (!state.wfm_dir_presets) state.wfm_dir_presets = [];
       state.wfm_dir_presets.push({ name, text });
       if (nameInput) nameInput.value = '';
-      push(); renderWfmLib();
+      push(true); renderWfmLib();
     };
 
     // WFM Wiring
     el.querySelector('#ri-wfm-tab-gen').onclick   = () => setWfmView('generate');
     el.querySelector('#ri-wfm-tab-saved').onclick = () => setWfmView('saved');
-    el.querySelector('#ri-dir-ta').oninput = (e) => { state.wfm_direction = e.target.value; };
+    el.querySelector('#ri-dir-ta').oninput = (e) => { state.wfm_direction = e.target.value; push(); };
     el.querySelector('#ri-wfm-preset-chk').onchange = (e) => {
       state.wfm_include_preset = e.target.checked;
       const picker = document.getElementById('ri-preset-picker');
       if (picker) picker.style.display = e.target.checked ? 'block' : 'none';
-      push();
+      push(true);
     };
     el.querySelector('#ri-preset-select').onchange = (e) => {
       state.wfm_preset_id = e.target.value || null;
-      push();
+      push(true);
     };
     el.querySelector('#ri-gen').onclick     = generate;
     el.querySelector('#ri-use').onclick     = () => { if (drafts[draftIdx]) insertDraft(drafts[draftIdx]); };
@@ -785,7 +797,7 @@ export function setup(ctx) {
       if (!text) return;
       if (!state.saved_drafts.includes(text)) {
         state.saved_drafts = [text, ...state.saved_drafts];
-        push();
+        push(true);
       }
       const btn = el.querySelector('#ri-save-draft');
       btn.innerHTML = IC.saved;
@@ -802,11 +814,11 @@ export function setup(ctx) {
     tplScr.oninput = () => { state.templates.scratch_prompt = tplScr.value; push(); };
 
     el.querySelector('#ri-reset-tpl-btn').onclick = () => {
-      state.templates = { ...DEFAULT_TEMPLATES };
+      state.templates = { ...defaultTemplates };
       tplSys.value = state.templates.system_prompt;
       tplRew.value = state.templates.rewrite_prompt;
       tplScr.value = state.templates.scratch_prompt;
-      push();
+      push(true);
     };
 
     return el;
@@ -841,7 +853,7 @@ export function setup(ctx) {
       wrap.querySelector('.ri-saved-act:not(.ri-saved-del)').onclick = () => insertDraft(text);
       wrap.querySelector('.ri-saved-del').onclick = () => {
         state.saved_drafts.splice(i, 1);
-        push();
+        push(true);
         renderSavedList();
       };
       container.appendChild(wrap);
@@ -882,6 +894,15 @@ export function setup(ctx) {
     const status = document.getElementById('ri-status');
     if (genBtn) { genBtn.disabled = true; genBtn.innerHTML = '…'; }
     if (status) status.textContent = 'Generating…';
+    clearTimeout(genTimer);
+    genTimer = setTimeout(() => {
+      if (!generating) return;
+      generating = false;
+      const b = document.getElementById('ri-gen');
+      const st = document.getElementById('ri-status');
+      if (b) { b.disabled = false; b.innerHTML = `${IC.gen} Generate`; }
+      if (st) st.textContent = 'Timed out — try again.';
+    }, 90000);
 
     const ta = getComposerInput();
     const currentInput = ta?.value?.trim() || '';
@@ -958,6 +979,7 @@ export function setup(ctx) {
     if (!btn) return;
     btn.classList.toggle('ri-on',      panelOpen && activeTab === 'ri');
     btn.classList.toggle('ri-enabled', state.enabled);
+    btn.title = state.enabled ? `Response Instructions — ON (${scopeSummary()})` : 'Response Instructions';
   }
   function refreshBtns() {
     refreshRiBtn();
@@ -1001,14 +1023,53 @@ export function setup(ctx) {
       }
     }
 
-    const t = state.templates ?? DEFAULT_TEMPLATES;
-    if (tplSys) tplSys.value = t.system_prompt ?? DEFAULT_TEMPLATES.system_prompt;
-    if (tplRew) tplRew.value = t.rewrite_prompt ?? DEFAULT_TEMPLATES.rewrite_prompt;
-    if (tplScr) tplScr.value = t.scratch_prompt ?? DEFAULT_TEMPLATES.scratch_prompt;
+    const t = state.templates ?? {};
+    if (tplSys) tplSys.value = t.system_prompt  ?? defaultTemplates.system_prompt  ?? '';
+    if (tplRew) tplRew.value = t.rewrite_prompt ?? defaultTemplates.rewrite_prompt ?? '';
+    if (tplScr) tplScr.value = t.scratch_prompt ?? defaultTemplates.scratch_prompt ?? '';
 
     setRiMode(state.ri_mode ?? 'simple', true);
     applySimpleToUI();
+    applyScopeToUI();
     refreshRiBtn();
+  }
+
+  function scopeSummary() {
+    const on = SCOPES.filter(sc => state.scope?.[sc.key] !== false);
+    if (on.length === SCOPES.length) return 'all generations';
+    if (!on.length) return 'nothing (all off)';
+    return on.map(sc => sc.label).join(', ');
+  }
+
+  function applyScopeToUI() {
+    document.querySelectorAll('.ri-scope-chip').forEach(chip => {
+      chip.classList.toggle('ri-on', state.scope?.[chip.dataset.scope] !== false);
+    });
+    const sum = document.getElementById('ri-scope-summary');
+    if (sum) sum.textContent = `Injected on: ${scopeSummary()}`;
+  }
+
+  // Swap a preset name for an input; commit on Enter/blur, cancel on Escape.
+  // apply(name) gets the new name, or null when nothing changed — it must re-render the list.
+  function startRename(nameEl, current, apply) {
+    if (!nameEl) return;
+    const input = document.createElement('input');
+    input.className = 'ri-lib-name-input';
+    input.value = current;
+    nameEl.replaceWith(input);
+    input.focus(); input.select();
+    let done = false;
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      apply(commit && v && v !== current ? v : null);
+    };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    };
+    input.onblur = () => finish(true);
   }
 
   function applySimpleToUI() {
@@ -1030,7 +1091,7 @@ export function setup(ctx) {
     document.getElementById('ri-custom-body').style.display = mode === 'custom' ? 'flex' : 'none';
     document.getElementById('ri-mode-simple')?.classList.toggle('ri-on', mode === 'simple');
     document.getElementById('ri-mode-custom')?.classList.toggle('ri-on', mode === 'custom');
-    if (!silent) push();
+    if (!silent) push(true);
   }
 
   const SIMPLE_MAP = {
@@ -1091,18 +1152,49 @@ export function setup(ctx) {
     return state.instruction;
   }
 
-  function push() {
-    ctx.sendToBackend({ type: 'ri:update', ...state, _active_instruction: getActiveInstruction() });
+  // Typing is debounced; discrete actions (toggles, chips, preset edits) pass now=true.
+  function flushPush() {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+    ctx.sendToBackend({
+      type: 'ri:update',
+      instruction: state.instruction,
+      _active_instruction: getActiveInstruction(),
+      enabled: state.enabled,
+      scope: state.scope,
+      wfm_direction: state.wfm_direction,
+      saved_drafts: state.saved_drafts,
+      ri_mode: state.ri_mode,
+      simple: state.simple,
+      templates: state.templates,
+      wfm_include_preset: state.wfm_include_preset,
+      wfm_preset_id: state.wfm_preset_id,
+      ri_presets: state.ri_presets,
+      wfm_dir_presets: state.wfm_dir_presets,
+    });
+  }
+
+  function push(now) {
+    clearTimeout(pushTimer);
+    if (now) return flushPush();
+    pushTimer = setTimeout(flushPush, 400);
   }
 
   const unsubMsg = ctx.onBackendMessage((payload) => {
     if (payload.type === 'ri:state') {
-      state = { saved_drafts: [], templates: { ...DEFAULT_TEMPLATES }, wfm_include_preset: false, wfm_preset_id: null, preset_list: [], ri_presets: [], wfm_dir_presets: [], ...state, ...payload.state };
+      defaultTemplates = payload.state?.default_templates ?? defaultTemplates;
+      state = {
+        ...state,
+        saved_drafts: [], wfm_include_preset: false, wfm_preset_id: null,
+        preset_list: [], ri_presets: [], wfm_dir_presets: [],
+        ...payload.state,
+        scope: { ...defaultScope(), ...(payload.state?.scope ?? {}) },
+      };
       applyStateToUI();
-      ctx.sendToBackend({ type: 'ri:update', ...state });
     }
     if (payload.type === 'ri:draft') {
       generating = false;
+      clearTimeout(genTimer);
       const genBtn = document.getElementById('ri-gen');
       const status = document.getElementById('ri-status');
       if (genBtn) { genBtn.disabled = false; genBtn.innerHTML = `${IC.gen} Generate`; }
@@ -1114,16 +1206,17 @@ export function setup(ctx) {
     }
   });
 
+  // Only re-query the DOM when the composer we hooked is gone (chat switch / remount).
+  let composerEl = null;
+  const onComposerInput = () => {
+    if (panelOpen && activeTab === 'wfm') updatePreview();
+  };
   function attachComposerListener() {
+    if (composerEl?.isConnected) return;
     const composer = getComposerInput();
-    if (composer && !composer._ri_listening) {
-      composer._ri_listening = true;
-      composer.addEventListener('input', () => {
-        if (panelOpen && activeTab === 'wfm') {
-          updatePreview();
-        }
-      });
-    }
+    if (!composer) return;
+    composerEl = composer;
+    composer.addEventListener('input', onComposerInput);
   }
 
   function mount() {
@@ -1141,17 +1234,28 @@ export function setup(ctx) {
     inputArea.insertBefore(toolbar, inputRow);
 
     attachComposerListener();
+    if (pushTimer) flushPush();   // don't let the load overwrite edits still waiting to save
     ctx.sendToBackend({ type: 'ri:load' });
   }
 
-  const obs = new MutationObserver(() => { 
-    if (!document.getElementById('ri-toolbar')) mount(); 
-    attachComposerListener();
+  // Streaming tokens mutate the DOM constantly, so coalesce to one check per frame.
+  let obsQueued = false;
+  const obs = new MutationObserver(() => {
+    if (obsQueued) return;
+    obsQueued = true;
+    requestAnimationFrame(() => {
+      obsQueued = false;
+      if (!document.getElementById('ri-toolbar')) mount();
+      attachComposerListener();
+    });
   });
   obs.observe(document.body, { childList: true, subtree: true });
   mount();
 
   return () => {
+    if (pushTimer) flushPush();
+    clearTimeout(genTimer);
+    composerEl?.removeEventListener('input', onComposerInput);
     obs.disconnect(); unsubMsg(); removeStyle();
     document.getElementById('ri-toolbar')?.remove();
     document.getElementById('ri-panel')?.remove();

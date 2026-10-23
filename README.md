@@ -18,14 +18,19 @@ Inject a steering instruction into the prompt before every AI reply — no chara
 - **Custom mode** — raw freeform textarea. write exactly what you want, no restrictions.
 - Toggle on/off at any time without clearing your text
 - Dot indicator on the toolbar button stays visible when active, even with the panel closed
-- Preset library — save, load, and delete named instruction sets
+- **Applies to** — choose which kinds of generation get the instruction: **Send**, **Continue**, **Regenerate**, **Swipe**, **Impersonate**, **Quiet**. Handy for e.g. "only steer regenerations" or "never touch impersonate". All on by default; the button tooltip shows what's currently selected.
+- Preset library — save, load, rename, and delete named instruction sets
+- `{{char}}` / `{{user}}` and other Lumiverse macros work inside your instructions
 
 ### ✦ Write For Me
 
 AI drafts a reply for you using your active connection and the current chat context.
 
 - Add an optional direction (`act nervous`, `change the subject`, `confess feelings`…) or leave it blank
-- Hit **Generate** — uses whatever connection you have set up in Lumiverse
+- Hit **Generate** — uses your default connection in Lumiverse, with the real recent chat (last few messages, labelled by character/persona) as context
+- Optionally include a Lumiverse preset's prompt blocks in the generation context
+- Save directions you reuse as **Direction Presets** (📁 in the Write For Me header)
+- Edit the ghostwriter prompts from the ⚙ **Prompt Templates** tab (`{{user}}`, `{{char}}`, `{{context}}`, `{{draft}}`, `{{direction}}`)
 - Browse drafts with prev/next navigation, generate more if you don't like what you got
 - Save drafts you like for later from the **Saved** tab
 - Hit **Use this** to drop the draft into the chat input, then send as normal
@@ -35,7 +40,7 @@ AI drafts a reply for you using your active connection and the current chat cont
 ## Install
 
 1. Lumiverse → Extensions → Install Extension → paste this repo's URL
-2. Enable the extension and grant `interceptor` and `generation` permissions
+2. Enable the extension and grant the permissions listed below
 3. Open any chat — the toolbar appears just above the message input
 
 ---
@@ -44,14 +49,15 @@ AI drafts a reply for you using your active connection and the current chat cont
 
 Both features live in a row just above the chat input.
 
-**Response Instructions:**
-- Click the 📋 button to open the panel
+**Response Instructions** (document icon):
+- Click it to open the panel
 - Pick your settings in Simple mode, or switch to Custom for freeform input
-- Toggle **ON** — dot indicator appears on the button, instructions inject on next send
-- 📁 → preset library · 🗑 → clear · ✕ → close panel
+- Under **Applies to**, tick the generation types you want it on
+- Toggle **ON** — dot indicator appears on the button, instructions inject on the next matching generation
+- folder → preset library · trash → clear · ✕ → close panel
 
-**Write For Me:**
-- Click the ✦ button to open the panel
+**Write For Me** (wand icon):
+- Click it to open the panel
 - Optionally add a direction, hit **Generate**
 - Browse drafts with ← → · bookmark one with 🔖 to save it
 - **Use this** → drops the draft into chat input ready to send
@@ -89,10 +95,13 @@ Default on any field = nothing injected for that field. A live preview at the bo
 
 | Permission | Why |
 |---|---|
-| `interceptor` | Inject the active instruction into the prompt before every LLM call |
+| `interceptor` | Inject the active instruction into the prompt before matching LLM calls |
 | `generation` | Write For Me AI drafting |
+| `chats`, `chat_mutation` | Write For Me reads the open chat's recent messages for context |
+| `characters`, `personas` | Write For Me looks up the character and persona names |
+| `presets` | List presets and pull their prompt blocks for "Include preset context" |
 
-Storage is free-tier — no extra permission needed. Everything (instructions, presets, Simple selections, saved drafts) persists across sessions.
+If a chat-related permission is denied, Write For Me falls back to reading the last few messages off the page. Storage is free-tier — no extra permission needed. Everything (instructions, presets, Simple selections, saved drafts) persists across sessions.
 
 ---
 

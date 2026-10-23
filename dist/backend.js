@@ -1,8 +1,13 @@
 // Response Instructions + Write For Me — backend
 
-let activeInstruction = '';
+// generationType values the interceptor can receive. Anything unknown is treated as "apply".
+const SCOPE_KEYS = ['normal', 'continue', 'regenerate', 'swipe', 'impersonate', 'quiet'];
+const DEFAULT_SCOPE = Object.fromEntries(SCOPE_KEYS.map(k => [k, true]));
+
+let activeInstruction = '';   // what the interceptor injects (composed simple text or custom text)
+let customInstruction = '';   // the Custom-mode textarea, kept separate so Simple mode can't clobber it
 let instructionEnabled = false;
-let savedPresets = {};
+let scope = { ...DEFAULT_SCOPE };
 let savedWfmDir = '';
 let savedDrafts = [];
 let savedRiMode = 'simple';
@@ -46,14 +51,15 @@ async function loadState(userId) {
   try {
     const raw = await spindle.storage.read(`state_${userId ?? 'default'}.json`);
     const parsed = JSON.parse(raw);
-    activeInstruction  = parsed.instruction   ?? '';
+    activeInstruction  = parsed.active_instruction ?? parsed.instruction ?? '';
+    customInstruction  = parsed.custom_instruction ?? parsed.instruction ?? '';
     instructionEnabled = parsed.enabled       ?? false;
-    savedPresets       = parsed.presets       ?? {};
+    scope              = { ...DEFAULT_SCOPE, ...(parsed.scope ?? {}) };
     savedWfmDir        = parsed.wfm_direction ?? '';
     savedDrafts        = parsed.saved_drafts  ?? [];
     savedRiMode        = parsed.ri_mode       ?? 'simple';
     savedSimple        = parsed.simple        ?? {};
-    savedTemplates     = parsed.templates       ?? { ...DEFAULT_TEMPLATES };
+    savedTemplates     = { ...DEFAULT_TEMPLATES, ...(parsed.templates ?? {}) };
     wfmIncludePreset   = parsed.wfm_include_preset ?? false;
     wfmPresetId        = parsed.wfm_preset_id      ?? null;
     savedRiPresets     = parsed.ri_presets         ?? [];
@@ -66,11 +72,12 @@ async function loadState(userId) {
 async function persistState(userId) {
   try {
     await spindle.storage.write(`state_${userId ?? 'default'}.json`, JSON.stringify({
-      instruction:   activeInstruction,
-      enabled:       instructionEnabled,
-      presets:       savedPresets,
-      wfm_direction: savedWfmDir,
-      saved_drafts:  savedDrafts,
+      active_instruction: activeInstruction,
+      custom_instruction: customInstruction,
+      enabled:            instructionEnabled,
+      scope,
+      wfm_direction:      savedWfmDir,
+      saved_drafts:       savedDrafts,
       ri_mode:            savedRiMode,
       simple:             savedSimple,
       templates:          savedTemplates,
@@ -91,6 +98,40 @@ function renderTemplate(tpl, vars) {
     .replace(/\{\{direction\}\}/g, vars.direction || 'Continue the scene naturally.');
 }
 
+// ─── Chat context for Write For Me ────────────────────────────────────────────
+// Reads the real chat instead of scraping the page. Returns null if anything is
+// unavailable (missing permission, no open chat) so the caller can fall back to
+// the snippet the frontend scraped.
+async function buildChatContext(userId, fallbackChar, fallbackPersona) {
+  try {
+    const chat = await spindle.chats.getActive(userId);
+    if (!chat?.id) return null;
+
+    const [character, persona, messages] = await Promise.all([
+      chat.character_id ? spindle.characters.get(chat.character_id, userId).catch(() => null) : null,
+      spindle.personas.getActive(userId).catch(() => null),
+      spindle.chat.getMessages(chat.id),
+    ]);
+
+    const charName = character?.name || fallbackChar;
+    const personaName = persona?.name || fallbackPersona;
+
+    const recent = (messages ?? [])
+      .filter(m => m.role !== 'system' && m.content?.trim() && !m.extra?.hidden)
+      .slice(-6);
+    if (!recent.length) return null;
+
+    const context = recent
+      .map(m => `${m.role === 'user' ? personaName : charName}: ${m.content.trim().slice(0, 1200)}`)
+      .join('\n\n');
+
+    return { charName, personaName, context };
+  } catch (err) {
+    spindle.log.warn('Chat context unavailable, using page snippet:', err?.message);
+    return null;
+  }
+}
+
 // ─── Frontend Messages ────────────────────────────────────────────────────────
 spindle.onFrontendMessage(async (payload, userId) => {
   if (!payload) return;
@@ -105,14 +146,15 @@ spindle.onFrontendMessage(async (payload, userId) => {
     spindle.sendToFrontend({
       type: 'ri:state',
       state: {
-        instruction:        activeInstruction,
+        instruction:        customInstruction,
         enabled:            instructionEnabled,
-        presets:            savedPresets,
+        scope,
         wfm_direction:      savedWfmDir,
         saved_drafts:       savedDrafts,
         ri_mode:            savedRiMode,
         simple:             savedSimple,
         templates:          savedTemplates,
+        default_templates:  DEFAULT_TEMPLATES,
         wfm_include_preset: wfmIncludePreset,
         wfm_preset_id:      wfmPresetId,
         preset_list:        presetList,
@@ -123,9 +165,10 @@ spindle.onFrontendMessage(async (payload, userId) => {
   }
 
   if (payload.type === 'ri:update') {
-    activeInstruction  = payload._active_instruction ?? payload.instruction ?? activeInstruction;
+    if (payload._active_instruction !== undefined) activeInstruction = payload._active_instruction ?? '';
+    if (payload.instruction !== undefined)         customInstruction = payload.instruction ?? '';
+    if (payload.scope)                             scope = { ...DEFAULT_SCOPE, ...payload.scope };
     instructionEnabled = payload.enabled       ?? instructionEnabled;
-    savedPresets       = payload.presets       ?? savedPresets;
     savedWfmDir        = payload.wfm_direction ?? savedWfmDir;
     savedDrafts        = payload.saved_drafts  ?? savedDrafts;
     savedRiMode        = payload.ri_mode       ?? savedRiMode;
@@ -141,14 +184,21 @@ spindle.onFrontendMessage(async (payload, userId) => {
   if (payload.type === 'ri:generate') {
     const direction = payload.direction?.trim() || '';
     const userInput = payload.userInput?.trim() || '';
-    const charName = payload.charName || 'the companion';
-    const personaName = payload.personaName || 'the user';
-    const contextSnippet = payload.contextSnippet?.trim() || '';
+    let charName = payload.charName || 'the companion';
+    let personaName = payload.personaName || 'the user';
+    let contextSnippet = payload.contextSnippet?.trim() || '';
 
     try {
       const connections = await spindle.connections.list(userId);
       const conn = connections?.find(c => c.is_default) ?? connections?.[0];
       if (!conn) throw new Error('No connection profile found in Lumiverse settings.');
+
+      const chatCtx = await buildChatContext(userId, charName, personaName);
+      if (chatCtx) {
+        charName = chatCtx.charName;
+        personaName = chatCtx.personaName;
+        contextSnippet = chatCtx.context;
+      }
 
       const tpls = { ...DEFAULT_TEMPLATES, ...savedTemplates };
       const vars = {
@@ -194,7 +244,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
         userId,
         connection_id: conn.id,
         messages,
-        parameters: { max_tokens: 600, temperature: 0.8 },
+        parameters: { max_tokens: 800, temperature: 0.8 },
         reasoning: { source: 'off' },
       });
 
@@ -207,18 +257,23 @@ spindle.onFrontendMessage(async (payload, userId) => {
       spindle.sendToFrontend({ type: 'ri:draft', text: rawText }, userId);
     } catch (err) {
       spindle.log.error('RI Generation failed:', err);
-      spindle.sendToFrontend({ 
-        type: 'ri:draft', 
-        text: '', 
-        error: err?.message || 'Generation error' 
+      spindle.sendToFrontend({
+        type: 'ri:draft',
+        text: '',
+        error: err?.message || 'Generation error'
       }, userId);
     }
   }
 });
 
 // ─── Prompt Interceptor ───────────────────────────────────────────────────────
-spindle.registerInterceptor(async (messages) => {
+spindle.registerInterceptor(async (messages, context) => {
   if (!instructionEnabled || !activeInstruction.trim()) return messages;
+
+  // Respect the "Applies to" selection. Unknown/missing types fall through and apply.
+  const type = context?.generationType;
+  if (type && scope[type] === false) return messages;
+
   const injected = { role: 'system', content: `[Response Instructions]\n${activeInstruction.trim()}` };
   let lastUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
